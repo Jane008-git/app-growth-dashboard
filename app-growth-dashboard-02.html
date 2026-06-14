@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>APP用户增长分析平台 | 交互式数据上传与SQL分析</title>
+    <!-- 引入必要的库：PapaParse解析CSV，SQL.js执行SQL，Chart.js绘图（轻量图表） -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #f0f2f5;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            padding: 30px 24px;
+            color: #1e293b;
+        }
+
+        .dashboard-container {
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+
+        /* 头部和卡片样式 */
+        .header {
+            margin-bottom: 28px;
+        }
+
+        .header h1 {
+            font-size: 28px;
+            font-weight: 600;
+            background: linear-gradient(135deg, #2563eb, #1e40af);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+        }
+
+        .card {
+            background: #ffffff;
+            border-radius: 20px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03), 0 1px 2px rgba(0, 0, 0, 0.05);
+            padding: 20px 24px;
+            margin-bottom: 28px;
+            border: 1px solid #eef2f6;
+            transition: all 0.2s;
+        }
+
+        .card-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 18px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            border-left: 4px solid #3b82f6;
+            padding-left: 14px;
+        }
+
+        /* 上传区域样式 */
+        .upload-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .upload-box {
+            flex: 1;
+            min-width: 200px;
+            background: #f8fafc;
+            border-radius: 18px;
+            padding: 16px;
+            border: 1px dashed #cbd5e1;
+            transition: 0.2s;
+            text-align: center;
+        }
+
+        .upload-box:hover {
+            background: #f1f5f9;
+            border-color: #3b82f6;
+        }
+
+        .upload-label {
+            font-weight: 600;
+            display: block;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+
+        input[type="file"] {
+            font-size: 12px;
+            margin-top: 6px;
+        }
+
+        .status-badge {
+            font-size: 12px;
+            margin-top: 8px;
+            color: #166534;
+        }
+
+        .sql-section {
+            background: #fefce8;
+            border-radius: 20px;
+            padding: 16px;
+            margin-top: 12px;
+            border: 1px solid #fde047;
+        }
+
+        textarea {
+            width: 100%;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            padding: 12px;
+            border-radius: 14px;
+            border: 1px solid #e2e8f0;
+            background: #fefcf5;
+        }
+
+        button {
+            background: #3b82f6;
+            border: none;
+            padding: 8px 18px;
+            border-radius: 40px;
+            font-weight: 500;
+            color: white;
+            cursor: pointer;
+            transition: 0.2s;
+            margin-top: 10px;
+            font-size: 14px;
+        }
+
+        button:hover {
+            background: #2563eb;
+        }
+
+        .query-result {
+            overflow-x: auto;
+            margin-top: 16px;
+            font-size: 13px;
+        }
+
+        table.mini-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        .mini-table th, .mini-table td {
+            border: 1px solid #e2e8f0;
+            padding: 8px 10px;
+            text-align: left;
+        }
+
+        .kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 16px;
+            margin: 16px 0;
+        }
+
+        .kpi-item {
+            background: #f8fafc;
+            border-radius: 18px;
+            padding: 14px;
+            text-align: center;
+        }
+
+        .kpi-value {
+            font-size: 28px;
+            font-weight: 700;
+        }
+
+        .trend-up {
+            color: #10b981;
+            font-size: 12px;
+        }
+
+        .two-columns {
+            display: flex;
+            gap: 24px;
+            flex-wrap: wrap;
+        }
+
+        .col {
+            flex: 1;
+        }
+
+        hr {
+            margin: 12px 0;
+        }
+
+        .footer-note {
+            text-align: center;
+            font-size: 12px;
+            color: #64748b;
+            margin-top: 30px;
+        }
+    </style>
+</head>
+<body>
+<div class="dashboard-container">
+    <div class="header">
+        <h1>📱 APP用户增长与A/B实验分析平台 · 交互版</h1>
+        <p>上传 CSV 数据 (users, events, channels, ab_tests, payments) + 执行自定义SQL分析 | 内置留存/漏斗/A/B测试模板</p>
+    </div>
+
+    <!-- 多文件上传区域 -->
+    <div class="card">
+        <div class="card-title">📂 1. 上传数据文件 (CSV格式)</div>
+        <div class="upload-grid" id="uploadGrid">
+            <div class="upload-box" data-table="users">
+                <span class="upload-label">👥 users 用户表</span>
+                <input type="file" accept=".csv" id="file-users">
+                <div id="status-users" class="status-badge"></div>
+            </div>
+            <div class="upload-box" data-table="events">
+                <span class="upload-label">📊 events 行为事件表</span>
+                <input type="file" accept=".csv" id="file-events">
+                <div id="status-events" class="status-badge"></div>
+            </div>
+            <div class="upload-box" data-table="channels">
+                <span class="upload-label">📢 channels 渠道表</span>
+                <input type="file" accept=".csv" id="file-channels">
+                <div id="status-channels" class="status-badge"></div>
+            </div>
+            <div class="upload-box" data-table="ab_tests">
+                <span class="upload-label">🧪 ab_tests 实验分组表</span>
+                <input type="file" accept=".csv" id="file-ab_tests">
+                <div id="status-ab_tests" class="status-badge"></div>
+            </div>
+            <div class="upload-box" data-table="payments">
+                <span class="upload-label">💰 payments 付费表</span>
+                <input type="file" accept=".csv" id="file-payments">
+                <div id="status-payments" class="status-badge"></div>
+            </div>
+        </div>
+        <div style="text-align: right; margin-top: 8px;">
+            <button id="loadAllBtn">🔄 加载所有已选CSV到内存数据库</button>
+            <button id="resetDbBtn" style="background:#64748b;">🗑️ 重置数据库</button>
+        </div>
+        <div id="dbLoadMsg" style="margin-top: 12px; font-size:13px; color:#2c6e3f;"></div>
+    </div>
+
+    <!-- SQL 编辑器 + 快速模板 -->
+    <div class="card">
+        <div class="card-title">📝 2. SQL 分析 (支持上传自定义SQL文件 / 直接编写)</div>
+        <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center;">
+            <input type="file" id="sqlFileInput" accept=".sql" style="width: auto;">
+            <span style="font-size:13px;">或使用模板快速填充:</span>
+            <button id="templateRetention">留存分析模板</button>
+            <button id="templateFunnel">漏斗分析模板</button>
+            <button id="templateChannel">渠道质量模板</button>
+            <button id="templateABTest">A/B实验模板</button>
+        </div>
+        <textarea id="sqlEditor" rows="6" placeholder="-- 在这里编写SQL查询，例如: SELECT * FROM users LIMIT 10; 表名: users, events, channels, ab_tests, payments"></textarea>
+        <button id="executeSqlBtn">▶ 执行SQL查询</button>
+        <div id="sqlResultArea" class="query-result" style="margin-top: 16px;">
+            <div style="font-weight:500;">查询结果:</div>
+            <div id="sqlResultTable">暂无结果，执行SQL后显示</div>
+        </div>
+    </div>
+
+    <!-- 预置动态看板 (基于数据库动态刷新) -->
+    <div class="card">
+        <div class="card-title">📊 核心指标看板 (动态刷新)</div>
+        <div id="dynamicKpis" class="kpi-grid">
+            <div class="kpi-item">等待数据加载...</div>
+        </div>
+        <div id="insightMsg" style="background:#eef2ff; border-radius: 14px; padding: 12px; margin-top: 8px;"></div>
+    </div>
+
+    <div class="two-columns">
+        <div class="col">
+            <div class="card">
+                <div class="card-title">📈 渠道质量摘要 (Top渠道留存/ROI)</div>
+                <div id="channelSummary">请先加载数据并执行渠道模板</div>
+            </div>
+        </div>
+        <div class="col">
+            <div class="card">
+                <div class="card-title">🧪 A/B实验对比 (引导完成率/D1留存)</div>
+                <div id="abSummary">等待实验数据</div>
+            </div>
+        </div>
+    </div>
+    <div class="footer-note">
+        💡 提示: 上传完整5张CSV后点击“加载所有CSV”，即可使用SQL查询；模板基于你的表结构自动适配。当前支持SQLite语法。
+    </div>
+</div>
+
+<script>
+    // 全局 SQL.js 数据库实例
+    let db = null;
+    let SQL = null;
+    let isSqlInitialized = false;
+    
+    // 存储原始CSV内容 (临时)
+    let csvDataMap = {
+        users: null,
+        events: null,
+        channels: null,
+        ab_tests: null,
+        payments: null
+    };
+    
+    // 初始化 sql.js
+    function initSqlJs() {
+        return new Promise((resolve, reject) => {
+            if (window.SQL && typeof window.SQL === 'function') {
+                window.SQL().then(sqlModule => {
+                    SQL = sqlModule;
+                    isSqlInitialized = true;
+                    resolve();
+                }).catch(reject);
+            } else {
+                // 兼容CDN加载
+                const script = document.createElement('script');
+                script.src = 'https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.js';
+                script.onload = () => {
+                    window.initSqlJs({ locateFile: () => 'https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.wasm' }).then(sqlModule => {
+                        SQL = sqlModule;
+                        isSqlInitialized = true;
+                        resolve();
+                    }).catch(reject);
+                };
+                document.head.appendChild(script);
+            }
+        });
+    }
+    
+    // 创建新数据库并导入所有已上传csv
+    async function buildDatabase() {
+        if (!isSqlInitialized) await initSqlJs();
+        if (!SQL) { alert("SQL引擎加载失败"); return false; }
+        const newDb = new SQL.Database();
+        
+        // 遍历五张表
+        const tables = ['users', 'events', 'channels', 'ab_tests', 'payments'];
+        let allLoaded = true;
+        for (const table of tables) {
+            const csvText = csvDataMap[table];
+            if (!csvText) {
+                console.warn(`${table} 未上传`);
+                allLoaded = false;
+                continue;
+            }
+            // 解析CSV
+            const result = Papa.parse(csvText, { header: true, skipEmptyLines: true });
+            if (result.errors.length) console.warn(table, result.errors);
+            const data = result.data;
+            if (data.length === 0) continue;
+            const columns = result.meta.fields;
+            // 创建表: 使用 TEXT 类型简化适配
+            const createCols = columns.map(col => `"${col}" TEXT`).join(',');
+            const createSQL = `CREATE TABLE IF NOT EXISTS ${table} (${createCols})`;
+            newDb.run(createSQL);
+            
+            // 插入数据
+            const placeholders = columns.map(() => '?').join(',');
+            const insertSQL = `INSERT INTO ${table} VALUES (${placeholders})`;
+            for (const row of data) {
+                const values = columns.map(col => row[col] === undefined ? null : row[col]);
+                newDb.run(insertSQL, values);
+            }
+            document.getElementById(`status-${table}`).innerHTML = `✅ 已加载 ${data.length} 行`;
+        }
+        if (db) db.close();
+        db = newDb;
+        document.getElementById('dbLoadMsg').innerHTML = `✅ 数据库已构建 (包含表: ${tables.filter(t => csvDataMap[t]).join(', ')})`;
+        // 刷新动态看板
+        refreshDynamicDashboard();
+        return true;
+    }
+    
+    // 刷新 KPI 与关键指标 (简单查询)
+    async function refreshDynamicDashboard() {
+        if (!db) {
+            document.getElementById('dynamicKpis').innerHTML = '<div class="kpi-item">未加载数据，请先上传CSV并点击加载</div>';
+            return;
+        }
+        try {
+            // 获取用户数
+            let userCount = 0, eventCount = 0, regCount = 0, finishGuide = 0, totalInstall = 0;
+            const userRes = db.exec("SELECT COUNT(*) as cnt FROM users");
+            if (userRes.length) userCount = userRes[0].values[0][0];
+            const eventRes = db.exec("SELECT COUNT(*) FROM events");
+            if (eventRes.length) eventCount = eventRes[0].values[0][0];
+            const regRes = db.exec("SELECT COUNT(*) FROM events WHERE event_name = 'register'");
+            if (regRes.length) regCount = regRes[0].values[0][0];
+            const finishRes = db.exec("SELECT COUNT(*) FROM events WHERE event_name = 'finish_onboarding'");
+            if (finishRes.length) finishGuide = finishRes[0].values[0][0];
+            // 安装量近似users总数
+            totalInstall = userCount;
+            const regRate = totalInstall > 0 ? ((regCount / totalInstall)*100).toFixed(1) : 0;
+            const finishRate = totalInstall > 0 ? ((finishGuide / totalInstall)*100).toFixed(1) : 0;
+            
+            const kpisHtml = `
+                <div class="kpi-item"><div class="kpi-label">👥 总用户数</div><div class="kpi-value">${userCount.toLocaleString()}</div></div>
+                <div class="kpi-item"><div class="kpi-label">📊 事件总量</div><div class="kpi-value">${eventCount.toLocaleString()}</div></div>
+                <div class="kpi-item"><div class="kpi-label">✅ 注册转化率</div><div class="kpi-value">${regRate}%</div></div>
+                <div class="kpi-item"><div class="kpi-label">🏁 引导完成率</div><div class="kpi-value">${finishRate}%</div></div>
+            `;
+            document.getElementById('dynamicKpis').innerHTML = kpisHtml;
+            // 渠道质量摘要预览
+            const channelRes = db.exec("SELECT channel, COUNT(*) as installs FROM users GROUP BY channel LIMIT 5");
+            if (channelRes.length && channelRes[0].values.length) {
+                let html = '<table class="mini-table"><tr><th>渠道</th><th>安装量</th></tr>';
+                channelRes[0].values.forEach(row => { html += `<tr><td>${row[0]}</td><td>${row[1]}</td></tr>`; });
+                html += '</table><div>💡 可执行“渠道质量模板”获取详细LTV/留存</div>';
+                document.getElementById('channelSummary').innerHTML = html;
+            } else {
+                document.getElementById('channelSummary').innerHTML = '暂无渠道数据';
+            }
+            // A/B 预览
+            const abExists = db.exec("SELECT COUNT(*) FROM ab_tests");
+            if (abExists.length && abExists[0].values[0][0] > 0) {
+                document.getElementById('abSummary').innerHTML = '实验数据已加载，点击下方A/B实验模板查看显著性分析';
+            } else {
+                document.getElementById('abSummary').innerHTML = '未检测到ab_tests表，无法展示实验对比';
+            }
+            document.getElementById('insightMsg').innerHTML = '📌 数据已就绪，可自定义SQL深入分析留存/漏斗/实验效果。';
+        } catch(e) { console.error(e); }
+    }
+    
+    // 执行SQL编辑器内容
+    async function executeCustomSql() {
+        if (!db) { alert("请先加载CSV数据并构建数据库"); return; }
+        const sql = document.getElementById('sqlEditor').value.trim();
+        if (!sql) { alert("请输入SQL"); return; }
+        try {
+            const results = db.exec(sql);
+            const resultDiv = document.getElementById('sqlResultTable');
+            if (!results || results.length === 0) {
+                resultDiv.innerHTML = "<div>执行成功，无返回结果</div>";
+                return;
+            }
+            let html = '';
+            for (let i=0; i<results.length; i++) {
+                const res = results[i];
+                const columns = res.columns;
+                const values = res.values;
+                html += `<div style="margin-top:12px;"><strong>结果集 ${i+1}:</strong></div><table class="mini-table"><thead><tr>${columns.map(col => `<th>${col}</th>`).join('')}</tr></thead><tbody>`;
+                values.forEach(row => {
+                    html += `<tr>${row.map(cell => `<td>${cell ?? ''}</td>`).join('')}</tr>`;
+                });
+                html += `</tbody></table>`;
+            }
+            resultDiv.innerHTML = html;
+        } catch(e) {
+            document.getElementById('sqlResultTable').innerHTML = `<div style="color:red;">SQL错误: ${e.message}</div>`;
+        }
+    }
+    
+    // 模板填充
+    function setSqlTemplate(type) {
+        if (!db) { alert("请先加载数据再使用模板"); return; }
+        let sql = '';
+        if (type === 'retention') {
+            sql = `-- Cohort 留存分析: 按注册日期分组计算 D1/D3/D7 留存率
+WITH install_cohort AS (
+    SELECT 
+        user_id,
+        DATE(install_date) as cohort_date
+    FROM users
+),
+user_activity AS (
+    SELECT 
+        u.user_id,
+        u.cohort_date,
+        DATE(e.event_time) as active_date,
+        julianday(DATE(e.event_time)) - julianday(u.cohort_date) as day_diff
+    FROM install_cohort u
+    JOIN events e ON u.user_id = e.user_id
+    WHERE e.event_name = 'app_open'
+)
+SELECT 
+    cohort_date,
+    COUNT(DISTINCT user_id) as new_users,
+    COUNT(DISTINCT CASE WHEN day_diff = 1 THEN user_id END) * 1.0 / COUNT(DISTINCT user_id) as D1_retention,
+    COUNT(DISTINCT CASE WHEN day_diff = 3 THEN user_id END) * 1.0 / COUNT(DISTINCT user_id) as D3_retention,
+    COUNT(DISTINCT CASE WHEN day_diff = 7 THEN user_id END) * 1.0 / COUNT(DISTINCT user_id) as D7_retention
+FROM user_activity
+GROUP BY cohort_date
+ORDER BY cohort_date DESC
+LIMIT 10;`;
+        } else if (type === 'funnel') {
+            sql = `-- 新用户漏斗: 安装 -> 注册 -> 开始引导 -> 完成引导 -> 核心功能点击
+SELECT 
+    '1_install' as step, COUNT(DISTINCT user_id) as users FROM users
+UNION ALL SELECT '2_register', COUNT(DISTINCT user_id) FROM events WHERE event_name='register'
+UNION ALL SELECT '3_start_onboarding', COUNT(DISTINCT user_id) FROM events WHERE event_name='start_onboarding'
+UNION ALL SELECT '4_finish_onboarding', COUNT(DISTINCT user_id) FROM events WHERE event_name='finish_onboarding'
+UNION ALL SELECT '5_click_core', COUNT(DISTINCT user_id) FROM events WHERE event_name='click_core_feature';`;
+        } else if (type === 'channel') {
+            sql = `SELECT 
+    u.channel,
+    COUNT(DISTINCT u.user_id) as installs,
+    COUNT(DISTINCT CASE WHEN e.event_name='finish_onboarding' THEN e.user_id END)*1.0 / COUNT(DISTINCT u.user_id) as activation_rate,
+    COUNT(DISTINCT p.user_id)*1.0 / COUNT(DISTINCT u.user_id) as pay_rate,
+    COALESCE(SUM(p.amount),0) / COUNT(DISTINCT u.user_id) as ltv
+FROM users u
+LEFT JOIN events e ON u.user_id=e.user_id
+LEFT JOIN payments p ON u.user_id=p.user_id
+GROUP BY u.channel
+ORDER BY ltv DESC;`;
+        } else if (type === 'abtest') {
+            sql = `SELECT 
+    a.group_name,
+    COUNT(DISTINCT a.user_id) as users,
+    COUNT(DISTINCT CASE WHEN e.event_name='finish_onboarding' THEN e.user_id END)*1.0 / COUNT(DISTINCT a.user_id) as finish_rate,
+    COUNT(DISTINCT CASE WHEN e.event_name='app_open' AND julianday(e.event_time)-julianday(u.install_date)=1 THEN e.user_id END)*1.0 / COUNT(DISTINCT a.user_id) as d1_retention
+FROM ab_tests a
+LEFT JOIN users u ON a.user_id = u.user_id
+LEFT JOIN events e ON a.user_id = e.user_id
+GROUP BY a.group_name;`;
+        }
+        document.getElementById('sqlEditor').value = sql;
+    }
+    
+    // 上传文件监听
+    function attachFileListeners() {
+        const fileInputs = ['users', 'events', 'channels', 'ab_tests', 'payments'];
+        fileInputs.forEach(table => {
+            const input = document.getElementById(`file-${table}`);
+            input.addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = function(evt) {
+                    csvDataMap[table] = evt.target.result;
+                    document.getElementById(`status-${table}`).innerHTML = `📄 ${file.name} 已缓存，点击"加载所有CSV"生效`;
+                };
+                reader.readAsText(file);
+            });
+        });
+    }
+    
+    // 上传SQL文件并填充编辑器
+    function attachSqlFileUpload() {
+        const sqlFileInput = document.getElementById('sqlFileInput');
+        sqlFileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(evt) {
+                document.getElementById('sqlEditor').value = evt.target.result;
+            };
+            reader.readAsText(file);
+        });
+    }
+    
+    // 重置数据库
+    function resetDatabase() {
+        if (db) { db.close(); db = null; }
+        for (let key in csvDataMap) csvDataMap[key] = null;
+        const tables = ['users', 'events', 'channels', 'ab_tests', 'payments'];
+        tables.forEach(t => {
+            document.getElementById(`status-${t}`).innerHTML = '';
+            const input = document.getElementById(`file-${t}`);
+            if (input) input.value = '';
+        });
+        document.getElementById('dbLoadMsg').innerHTML = '数据库已重置，请重新上传CSV';
+        document.getElementById('dynamicKpis').innerHTML = '<div class="kpi-item">等待数据...</div>';
+        document.getElementById('sqlResultTable').innerHTML = '无数据';
+        document.getElementById('channelSummary').innerHTML = '待加载';
+        document.getElementById('abSummary').innerHTML = '待加载';
+    }
+    
+    // 初始化
+    window.onload = async () => {
+        await initSqlJs();
+        attachFileListeners();
+        attachSqlFileUpload();
+        document.getElementById('loadAllBtn').addEventListener('click', async () => {
+            await buildDatabase();
+        });
+        document.getElementById('resetDbBtn').addEventListener('click', () => resetDatabase());
+        document.getElementById('executeSqlBtn').addEventListener('click', executeCustomSql);
+        document.getElementById('templateRetention').addEventListener('click', () => setSqlTemplate('retention'));
+        document.getElementById('templateFunnel').addEventListener('click', () => setSqlTemplate('funnel'));
+        document.getElementById('templateChannel').addEventListener('click', () => setSqlTemplate('channel'));
+        document.getElementById('templateABTest').addEventListener('click', () => setSqlTemplate('abtest'));
+    };
+</script>
+</body>
+</html>
